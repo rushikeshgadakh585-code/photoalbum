@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>3D Photo Globe</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: url('photos/pink-day-background.jpg') center center / cover no-repeat fixed; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Segoe UI', sans-serif; position: relative; overflow: hidden; }
+    body::before { content: ''; position: fixed; inset: 0; background: rgba(255,220,230,0.15); pointer-events: none; z-index: 0; }
+    body::after { content: ''; position: fixed; inset: 0; background-image: radial-gradient(circle, rgba(255,255,255,0.55) 1px, transparent 1px); background-size: 60px 60px; opacity: 0.07; pointer-events: none; z-index: 0; }
+    canvas, .hint, .controls { position: relative; z-index: 1; }
+    canvas { cursor: grab; display: block; }
+    canvas:active { cursor: grabbing; }
+
+    /* Petals */
+    .petal {
+      position: fixed; border-radius: 60% 0 60% 0;
+      pointer-events: none; z-index: 0;
+      animation: petalFall linear infinite;
+    }
+    @keyframes petalFall {
+      0%   { transform: translateY(-30px) rotate(0deg) translateX(0px); opacity: 0; }
+      8%   { opacity: 1; }
+      85%  { opacity: 0.5; }
+      100% { transform: translateY(105vh) rotate(600deg) translateX(50px); opacity: 0; }
+    }
+
+    .hint { margin-top: 16px; color: rgba(255,255,255,0.35); font-size: 0.8rem; letter-spacing: 2px; }
+    .controls { margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    .controls label { color: rgba(255,255,255,0.4); font-size: 0.78rem; letter-spacing: 1px; }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 110px; height: 4px; background: #444; border-radius: 2px; outline: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #888; cursor: pointer; }
+    #fileInput, #bgInput { display: none; }
+    .btn { color: #fff; border: none; padding: 8px 20px; border-radius: 50px; font-size: 0.82rem; cursor: pointer; letter-spacing: 1px; transition: opacity 0.2s; }
+    .btn:hover { opacity: 0.8; }
+    .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 999; justify-content: center; align-items: center; backdrop-filter: blur(8px); }
+    .lightbox.active { display: flex; }
+    .lightbox-inner { display: flex; flex-direction: column; align-items: center; position: relative; }
+    .lightbox img { max-width: 80vw; max-height: 70vh; border-radius: 14px; border: 2px solid rgba(140,210,255,0.6); box-shadow: 0 0 30px rgba(100,180,255,0.4); animation: popIn 0.35s cubic-bezier(0.34,1.56,0.64,1); display: block; }
+    @keyframes popIn { from { transform: scale(0.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .lb-date { color: rgba(140,210,255,0.85); font-size: 0.85rem; letter-spacing: 2px; margin-top: 10px; text-align: center; }
+    .lightbox-reflection { width: 100%; max-width: 80vw; height: 90px; position: relative; overflow: hidden; border-radius: 0 0 14px 14px; margin-top: -2px; }
+    .lightbox-reflection img { display: none; }
+    #reflectCanvas { width: 100%; height: 90px; display: block; }
+    .lightbox-reflection::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,10,0.05) 0%, rgba(0,0,10,0.92) 100%); z-index: 2; pointer-events: none; }
+    .lightbox-close { position: absolute; top: -40px; right: 0; font-size: 1.8rem; color: rgba(255,255,255,0.6); cursor: pointer; transition: color 0.2s, transform 0.2s; }
+    .lightbox-close:hover { color: rgba(140,210,255,1); transform: rotate(90deg) scale(1.2); }
+    .date-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1100; justify-content: center; align-items: center; backdrop-filter: blur(6px); }
+    .date-modal.active { display: flex; }
+    .date-box { background: rgba(10,20,40,0.95); border: 1px solid rgba(140,210,255,0.3); border-radius: 16px; padding: 28px 32px; text-align: center; color: rgba(255,255,255,0.8); font-size: 0.95rem; }
+    .date-box input[type=date] { margin-top: 14px; background: rgba(255,255,255,0.08); border: 1px solid rgba(140,210,255,0.4); border-radius: 8px; color: #fff; padding: 8px 14px; font-size: 0.9rem; outline: none; display: block; width: 100%; }
+    .date-box .dbtn { background: rgba(80,160,255,0.25); color: #fff; border: 1px solid rgba(140,210,255,0.4); padding: 8px 22px; border-radius: 50px; cursor: pointer; font-size: 0.85rem; margin-top: 12px; }
+    .date-box .dbtn:hover { background: rgba(80,160,255,0.5); }
+  </style>
+</head>
+<body>
+
+<div class="lightbox" id="lightbox">
+  <div class="lightbox-inner">
+    <span class="lightbox-close" id="lbClose">&#x2715;</span>
+    <img id="lbImg" src="" alt=""/>
+    <div class="lb-date" id="lbDate"></div>
+    <div class="lightbox-reflection">
+      <img id="lbReflect" src="" alt=""/>
+      <canvas id="reflectCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="date-modal" id="dateModal">
+  <div class="date-box">
+    <p>&#x1F4C5; Photo date</p>
+    <input type="date" id="dateInput"/>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button class="dbtn" id="dateOk">Save</button>
+      <button class="dbtn" id="dateSkip">Skip</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="c" width="520" height="560"></canvas>
+
+<div class="controls">
+  <label>SPEED</label>
+  <input type="range" id="spd" min="0" max="5" step="0.1" value="1.0"/>
+  <input type="file" id="fileInput" accept="image/*"/>
+  <span></span>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const CX = W/2, CY = H/2 - 20;
+
+let rotX=0.28, rotY=0, velX=0, velY=0;
+let isDrag=false, isMouseDown=false, lx, ly, mouseDownX, mouseDownY;
+let speed=1.0, zoom=1.0;
+let currentLbKey=null, pendingCell=null;
+
+const cellPhotos={}, cellDates={};
+const latLines=[-90,-60,-30,0,30,60,90];
+const lonLines=[0,45,90,135,180,225,270,315];
+
+/* __EMBED_START__ */
+const embeddedPhotos={};
+const embeddedDates={};
+const embeddedBg='';
+/* __EMBED_END__ */
+
+// Load photos.js
+(function(){
+  const sc=document.createElement('script');
+  sc.src='photos.js';
+  sc.onload=()=>{
+    if(typeof albumData!=='undefined'){
+      Object.entries(albumData).forEach(([k,v])=>{
+        const img=new Image(); img.onload=()=>{cellPhotos[k]=img;}; img.src=v.src;
+        if(v.date) cellDates[k]=v.date;
+      });
+    }
+  };
+  document.head.appendChild(sc);
+})();
+
+// Load embedded + localStorage
+Object.entries(embeddedPhotos).forEach(([k,src])=>{const img=new Image();img.onload=()=>{cellPhotos[k]=img;};img.src=src;});
+Object.entries(embeddedDates).forEach(([k,v])=>{cellDates[k]=v;});
+const _sp=JSON.parse(localStorage.getItem('globePhotos')||'{}');
+Object.entries(_sp).forEach(([k,src])=>{const img=new Image();img.onload=()=>{cellPhotos[k]=img;};img.src=src;});
+const _sd=JSON.parse(localStorage.getItem('globeDates')||'{}');
+Object.entries(_sd).forEach(([k,v])=>{cellDates[k]=v;});
+const _bg=localStorage.getItem('globeBg') || embeddedBg;
+if(_bg){document.body.style.backgroundImage=`url('${_bg}')`;document.body.style.backgroundSize='cover';}
+// Remove any saved background — we use fixed CSS background now
+localStorage.removeItem('globeBg');
+document.body.style.backgroundImage='';
+
+function updateStorage(){
+  let t=0; for(let k in localStorage){if(localStorage.hasOwnProperty(k))t+=localStorage[k].length*2;}
+  const el=document.getElementById('storageInfo');
+  if(el) el.textContent=`${(t/1024/1024).toFixed(2)}MB / 5MB`;
+}
+updateStorage();
+
+// Controls
+document.getElementById('spd').addEventListener('input',e=>speed=+e.target.value);
+
+document.getElementById('fileInput').addEventListener('change',e=>{
+  const file=e.target.files[0]; if(!file||pendingCell===null) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const tempImg=new Image();
+    tempImg.onload=()=>{
+      const maxSize=1200; let w=tempImg.width,h=tempImg.height;
+      if(w>maxSize||h>maxSize){if(w>h){h=Math.round(h*maxSize/w);w=maxSize;}else{w=Math.round(w*maxSize/h);h=maxSize;}}
+      const comp=document.createElement('canvas'); comp.width=w; comp.height=h;
+      comp.getContext('2d').drawImage(tempImg,0,0,w,h);
+      const src=comp.toDataURL('image/jpeg',0.85);
+      const img=new Image();
+      img.onload=()=>{
+        cellPhotos[pendingCell]=img;
+        try{const s=JSON.parse(localStorage.getItem('globePhotos')||'{}');s[pendingCell]=src;localStorage.setItem('globePhotos',JSON.stringify(s));updateStorage();}catch(err){alert('Storage full!');}
+        document.getElementById('dateInput').value=new Date().toISOString().split('T')[0];
+        document.getElementById('dateModal').classList.add('active');
+      };
+      img.src=src;
+    };
+    tempImg.src=ev.target.result;
+  };
+  reader.readAsDataURL(file); e.target.value='';
+});
+
+document.getElementById('dateOk').addEventListener('click',()=>{
+  const val=document.getElementById('dateInput').value;
+  if(val&&pendingCell){
+    const d=new Date(val);
+    const label=d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+    cellDates[pendingCell]=label;
+    const s=JSON.parse(localStorage.getItem('globeDates')||'{}');s[pendingCell]=label;localStorage.setItem('globeDates',JSON.stringify(s));
+  }
+  document.getElementById('dateModal').classList.remove('active'); pendingCell=null;
+});
+document.getElementById('dateSkip').addEventListener('click',()=>{document.getElementById('dateModal').classList.remove('active');pendingCell=null;});
+
+// 3D Math
+function toXYZ(lat,lon){const phi=(90-lat)*Math.PI/180,theta=lon*Math.PI/180;return[Math.sin(phi)*Math.cos(theta),Math.cos(phi),Math.sin(phi)*Math.sin(theta)];}
+function rotPt([x,y,z],rx,ry){let x1=x*Math.cos(ry)-z*Math.sin(ry),z1=x*Math.sin(ry)+z*Math.cos(ry),y2=y*Math.cos(rx)-z1*Math.sin(rx);return[x1,y2,y*Math.sin(rx)+z1*Math.cos(rx)];}
+function proj([x,y,z],R){return[CX+x*R,CY-y*R,z];}
+
+// Draw
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const R=200*zoom;
+
+  ctx.save(); ctx.scale(1,0.28);
+  const sy=(CY+R)/0.28+18;
+  const sg=ctx.createRadialGradient(CX,sy,0,CX,sy,R*0.85);
+  sg.addColorStop(0,'rgba(0,0,0,0.18)'); sg.addColorStop(1,'transparent');
+  ctx.beginPath(); ctx.ellipse(CX,sy,R*0.85,R*0.85,0,0,Math.PI*2); ctx.fillStyle=sg; ctx.fill(); ctx.restore();
+
+  ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2);
+  const gb=ctx.createRadialGradient(CX-R*0.3,CY-R*0.35,R*0.05,CX,CY,R);
+  gb.addColorStop(0,'rgba(180,220,255,0.18)'); gb.addColorStop(0.4,'rgba(120,180,255,0.10)'); gb.addColorStop(1,'rgba(40,80,160,0.22)');
+  ctx.fillStyle=gb; ctx.fill();
+
+  ctx.save(); ctx.beginPath(); ctx.arc(CX,CY,R-0.5,0,Math.PI*2); ctx.clip();
+  drawPhotoCells(R);
+  ctx.restore();
+
+  const eg=ctx.createRadialGradient(CX,CY,R*0.65,CX,CY,R);
+  eg.addColorStop(0,'transparent'); eg.addColorStop(1,'rgba(80,160,255,0.28)');
+  ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2); ctx.fillStyle=eg; ctx.fill();
+
+  const sp=ctx.createRadialGradient(CX-R*0.38,CY-R*0.4,0,CX-R*0.2,CY-R*0.2,R*0.6);
+  sp.addColorStop(0,'rgba(255,255,255,0.55)'); sp.addColorStop(1,'transparent');
+  ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2); ctx.fillStyle=sp; ctx.fill();
+
+  ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2); ctx.strokeStyle='rgba(160,210,255,0.5)'; ctx.lineWidth=1.5; ctx.stroke();
+}
+
+function drawLatLine(lat,R){
+  ctx.beginPath(); let ok=false;
+  for(let i=0;i<=120;i++){const p=rotPt(toXYZ(lat,-180+360*i/120),rotX,rotY);const[px,py,pz]=proj(p,R);if(pz>=0){if(!ok){ctx.moveTo(px,py);ok=true;}else ctx.lineTo(px,py);}else ok=false;}
+  ctx.strokeStyle='rgba(140,200,255,0.45)'; ctx.lineWidth=1; ctx.stroke();
+}
+function drawLonLine(lon,R){
+  ctx.beginPath(); let ok=false;
+  for(let i=0;i<=80;i++){const p=rotPt(toXYZ(-90+180*i/80,lon),rotX,rotY);const[px,py,pz]=proj(p,R);if(pz>=0){if(!ok){ctx.moveTo(px,py);ok=true;}else ctx.lineTo(px,py);}else ok=false;}
+  ctx.strokeStyle='rgba(140,200,255,0.35)'; ctx.lineWidth=1; ctx.stroke();
+}
+function drawGlowLine(val,R,isLat){
+  const RR=R+3; ctx.beginPath(); let ok=false; const steps=isLat?120:80;
+  for(let i=0;i<=steps;i++){
+    const lat=isLat?val:-90+180*i/steps, lon=isLat?(-180+360*i/steps):val;
+    const p=rotPt(toXYZ(lat,lon),rotX,rotY);const[px,py,pz]=proj(p,RR);
+    if(pz>=0){if(!ok){ctx.moveTo(px,py);ok=true;}else ctx.lineTo(px,py);}else ok=false;
+  }
+  ctx.strokeStyle='rgba(180,230,255,0.18)'; ctx.lineWidth=2.5; ctx.stroke();
+}
+
+// Cached XYZ points for performance
+const xyzCache={};
+function toXYZc(lat,lon){
+  const k=`${lat}_${lon}`;
+  if(!xyzCache[k]) xyzCache[k]=toXYZ(lat,lon);
+  return xyzCache[k];
+}
+
+function subPt(la0,la1,lo0,lo1,t,s,R,iw,ih){
+  const la=la0+(la1-la0)*t, ln=lo0+(lo1-lo0)*s;
+  const p=rotPt(toXYZ(la,ln),rotX,rotY); const sc=proj(p,R);
+  return{x:sc[0],y:sc[1],u:s*iw,v:(1-t)*ih};
+}
+// Safe version: lo1 may be > 360 to avoid wrap-around interpolation issues
+function subPtSafe(la0,la1,lo0,lo1,t,s,R,iw,ih){
+  const la=la0+(la1-la0)*t;
+  let ln=lo0+(lo1-lo0)*s;
+  if(ln>=360) ln-=360;
+  const p=rotPt(toXYZ(la,ln),rotX,rotY); const sc=proj(p,R);
+  return{x:sc[0],y:sc[1],u:s*iw,v:(1-t)*ih,z:p[2]};
+}
+
+function drawTri(img,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2,alpha){
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.lineTo(x2,y2); ctx.closePath(); ctx.clip();
+  const d=u0*(v1-v2)+u1*(v2-v0)+u2*(v0-v1);
+  if(Math.abs(d)<0.0001){ctx.restore();return;}
+  const a=(x0*(v1-v2)+x1*(v2-v0)+x2*(v0-v1))/d;
+  const b=(y0*(v1-v2)+y1*(v2-v0)+y2*(v0-v1))/d;
+  const c=(u0*(x1-x2)+u1*(x2-x0)+u2*(x0-x1))/d;
+  const dd=(u0*(y1-y2)+u1*(y2-y0)+u2*(y0-y1))/d;
+  const e=(u0*(v1*x2-v2*x1)+u1*(v2*x0-v0*x2)+u2*(v0*x1-v1*x0))/d;
+  const f=(u0*(v1*y2-v2*y1)+u1*(v2*y0-v0*y2)+u2*(v0*y1-v1*y0))/d;
+  ctx.transform(a,b,c,dd,e,f); ctx.drawImage(img,0,0); ctx.restore();
+}
+
+function drawPhotoCells(R){
+  for(let li=0;li<latLines.length-1;li++){
+    for(let lo=0;lo<lonLines.length;lo++){
+      const key=`${li}_${lo}`, photo=cellPhotos[key];
+      const la0=latLines[li],la1=latLines[li+1];
+      const lo0=lonLines[lo],lo1=lonLines[(lo+1)%lonLines.length];
+      const corners=[[la0,lo0],[la0,lo1],[la1,lo1],[la1,lo0]];
+      const pts=corners.map(([la,ln])=>{const p=rotPt(toXYZ(la,ln),rotX,rotY);return{sc:proj(p,R),z:p[2]};});
+      const avgZ=pts.reduce((s,p)=>s+p.z,0)/4;
+
+      // Skip cells that are mostly facing away
+      if(avgZ<0.05) continue;
+      const alpha=Math.min(1,(avgZ-0.05)*3);
+
+      if(photo){
+        const SUB=8,iw=photo.width,ih=photo.height;
+        // Compute a safe lon range — handle 315→360→0 wrap
+        const lo1safe = lo1 > lo0 ? lo1 : lo1 + 360;
+        for(let si=0;si<SUB;si++){
+          for(let sj=0;sj<SUB;sj++){
+            const t0=si/SUB,t1=(si+1)/SUB,s0=sj/SUB,s1=(sj+1)/SUB;
+            const A=subPtSafe(la0,la1,lo0,lo1safe,t0,s0,R,iw,ih);
+            const B=subPtSafe(la0,la1,lo0,lo1safe,t0,s1,R,iw,ih);
+            const C=subPtSafe(la0,la1,lo0,lo1safe,t1,s1,R,iw,ih);
+            const D=subPtSafe(la0,la1,lo0,lo1safe,t1,s0,R,iw,ih);
+            // Skip sub-cells that are on the back
+            if(A.z<0&&B.z<0&&C.z<0&&D.z<0) continue;
+            drawTri(photo,A.x,A.y,B.x,B.y,C.x,C.y,A.u,A.v,B.u,B.v,C.u,C.v,alpha);
+            drawTri(photo,A.x,A.y,C.x,C.y,D.x,D.y,A.u,A.v,C.u,C.v,D.u,D.v,alpha);
+          }
+        }
+      } else if(pendingCell===key){
+        ctx.save(); ctx.beginPath();
+        ctx.moveTo(pts[0].sc[0],pts[0].sc[1]); ctx.lineTo(pts[1].sc[0],pts[1].sc[1]);
+        ctx.lineTo(pts[2].sc[0],pts[2].sc[1]); ctx.lineTo(pts[3].sc[0],pts[3].sc[1]);
+        ctx.closePath(); ctx.fillStyle=`rgba(80,140,255,${alpha*0.45})`; ctx.fill(); ctx.restore();
+      }
+
+    }
+  }
+}
+
+function getCellAt(mx,my){
+  const R=200*zoom;
+  for(let li=0;li<latLines.length-1;li++){
+    for(let lo=0;lo<lonLines.length;lo++){
+      const corners=[[latLines[li],lonLines[lo]],[latLines[li],lonLines[(lo+1)%lonLines.length]],[latLines[li+1],lonLines[(lo+1)%lonLines.length]],[latLines[li+1],lonLines[lo]]];
+      const pts=corners.map(([la,ln])=>{const p=rotPt(toXYZ(la,ln),rotX,rotY);return proj(p,R);});
+      const avgZ=corners.map(([la,ln])=>rotPt(toXYZ(la,ln),rotX,rotY)[2]).reduce((a,b)=>a+b,0)/4;
+      if(avgZ<0) continue;
+      ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]); pts.slice(1).forEach(p=>ctx.lineTo(p[0],p[1])); ctx.closePath();
+      if(ctx.isPointInPath(mx,my)) return `${li}_${lo}`;
+    }
+  }
+  return null;
+}
+
+let lastT=0;
+function animate(t){
+  requestAnimationFrame(animate);
+  if(t-lastT < 28) return; // ~35fps cap
+  lastT=t;
+  if(!isDrag){rotY+=speed*0.004;velX*=0.93;velY*=0.93;rotX+=velX;rotY+=velY;rotX=Math.max(-1.3,Math.min(1.3,rotX));}
+  draw();
+}
+animate(0);
+
+canvas.addEventListener('mousedown',e=>{isMouseDown=true;isDrag=false;velX=velY=0;lx=e.clientX;ly=e.clientY;mouseDownX=e.clientX;mouseDownY=e.clientY;});
+window.addEventListener('mousemove',e=>{if(!isMouseDown)return;if(Math.abs(e.clientX-mouseDownX)>3||Math.abs(e.clientY-mouseDownY)>3)isDrag=true;if(!isDrag)return;velY=(e.clientX-lx)*0.009;velX=(e.clientY-ly)*0.009;rotY+=velY;rotX+=velX;rotX=Math.max(-1.3,Math.min(1.3,rotX));lx=e.clientX;ly=e.clientY;});
+window.addEventListener('mouseup',e=>{
+  if(!isDrag&&isMouseDown){
+    const rect=canvas.getBoundingClientRect();
+    const key=getCellAt(e.clientX-rect.left,e.clientY-rect.top);
+    if(key){
+      if(cellPhotos[key]){
+        currentLbKey=key;
+        document.getElementById('lbImg').src=cellPhotos[key].src;
+        document.getElementById('lbDate').textContent=cellDates[key]?'📅 '+cellDates[key]:'';
+        document.getElementById('lightbox').classList.add('active');
+        setTimeout(()=>startWater(cellPhotos[key]),50);
+      } else {pendingCell=key;document.getElementById('fileInput').click();}
+    }
+  }
+  isMouseDown=false;isDrag=false;
+});
+canvas.addEventListener('contextmenu',e=>{e.preventDefault();const rect=canvas.getBoundingClientRect();const key=getCellAt(e.clientX-rect.left,e.clientY-rect.top);if(key&&cellPhotos[key]&&confirm('Photo delete?')){delete cellPhotos[key];const s=JSON.parse(localStorage.getItem('globePhotos')||'{}');delete s[key];localStorage.setItem('globePhotos',JSON.stringify(s));}});
+canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(0.5,Math.min(1.8,zoom-e.deltaY*0.001));},{passive:false});
+let pinchDist0=null;
+let touchVelX=0,touchVelY=0,lastTouchTime=0;
+function getTouchDist(e){const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;return Math.sqrt(dx*dx+dy*dy);}
+
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  if(e.touches.length===2){
+    pinchDist0=getTouchDist(e);
+    isDrag=true;
+    lx=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    ly=(e.touches[0].clientY+e.touches[1].clientY)/2;
+    return;
+  }
+  pinchDist0=null;
+  isMouseDown=true;isDrag=false;
+  lx=e.touches[0].clientX;ly=e.touches[0].clientY;
+  mouseDownX=lx;mouseDownY=ly;
+  touchVelX=0;touchVelY=0;velX=0;velY=0;
+  lastTouchTime=Date.now();
+},{passive:false});
+
+canvas.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  const now=Date.now();
+  const dt=Math.max(1,now-lastTouchTime);
+  lastTouchTime=now;
+
+  if(e.touches.length===2){
+    if(pinchDist0!==null){
+      const d=getTouchDist(e);
+      zoom=Math.max(0.5,Math.min(1.8,zoom*(d/pinchDist0)));
+      pinchDist0=d;
+    }
+    const mx=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    const my=(e.touches[0].clientY+e.touches[1].clientY)/2;
+    const dvY=(mx-lx)*0.007, dvX=(my-ly)*0.007;
+    rotY+=dvY; rotX+=dvX;
+    rotX=Math.max(-1.3,Math.min(1.3,rotX));
+    lx=mx; ly=my;
+    return;
+  }
+
+  if(!isMouseDown) return;
+  const tx=e.touches[0].clientX,ty=e.touches[0].clientY;
+  if(Math.abs(tx-mouseDownX)>4||Math.abs(ty-mouseDownY)>4) isDrag=true;
+  if(!isDrag) return;
+
+  const rawDvY=(tx-lx)/dt*16*0.009;
+  const rawDvX=(ty-ly)/dt*16*0.009;
+
+  const alpha=0.35;
+  touchVelY=touchVelY*(1-alpha)+rawDvY*alpha;
+  touchVelX=touchVelX*(1-alpha)+rawDvX*alpha;
+
+  rotY+=touchVelY; rotX+=touchVelX;
+  rotX=Math.max(-1.3,Math.min(1.3,rotX));
+  lx=tx; ly=ty;
+},{passive:false});
+
+canvas.addEventListener('touchend',e=>{
+  e.preventDefault();
+  if(e.touches.length===0){
+    if(!isDrag&&isMouseDown){
+      const rect=canvas.getBoundingClientRect();
+      const key=getCellAt(e.changedTouches[0].clientX-rect.left,e.changedTouches[0].clientY-rect.top);
+      if(key){
+        if(cellPhotos[key]){
+          currentLbKey=key;
+          document.getElementById('lbImg').src=cellPhotos[key].src;
+          document.getElementById('lbDate').textContent=cellDates[key]?'📅 '+cellDates[key]:'';
+          document.getElementById('lightbox').classList.add('active');
+          setTimeout(()=>startWater(cellPhotos[key]),50);
+        } else {pendingCell=key;document.getElementById('fileInput').click();}
+      }
+    }
+    velX=touchVelX; velY=touchVelY;
+    isMouseDown=false;isDrag=false;pinchDist0=null;
+    touchVelX=0;touchVelY=0;
+  }
+},{passive:false});
+
+document.getElementById('lbClose').addEventListener('click',()=>{document.getElementById('lightbox').classList.remove('active');stopWater();});
+
+let waterRAF=null,waterTime=0;
+function startWater(img){
+  const rc=document.getElementById('reflectCanvas');
+  const rCtx=rc.getContext('2d');
+  const rW=rc.offsetWidth||600,rH=90;
+  rc.width=rW;rc.height=rH;
+  const off=document.createElement('canvas');off.width=rW;off.height=rH;
+  const oCtx=off.getContext('2d');
+  oCtx.save();oCtx.translate(0,rH);oCtx.scale(1,-1);
+  oCtx.drawImage(img,0,img.height*0.6,img.width,img.height*0.4,0,0,rW,rH);
+  oCtx.restore();
+  function loop(){
+    waterTime+=0.04;rCtx.clearRect(0,0,rW,rH);
+    for(let y=0;y<rH;y++){const prog=y/rH,amp=prog*10+2;const dx=Math.sin(y*0.04+waterTime)*amp+Math.sin(y*0.07+waterTime*1.3)*amp*0.5;rCtx.drawImage(off,0,y,rW,1,dx,y,rW,1);}
+    const fade=rCtx.createLinearGradient(0,0,0,rH);fade.addColorStop(0,'rgba(0,10,30,0.25)');fade.addColorStop(1,'rgba(0,10,30,0.88)');rCtx.fillStyle=fade;rCtx.fillRect(0,0,rW,rH);
+    for(let i=0;i<3;i++){const sy=((waterTime*18+i*30)%rH);rCtx.beginPath();rCtx.moveTo(0,sy);rCtx.lineTo(rW,sy);rCtx.strokeStyle=`rgba(140,210,255,${0.06+i*0.02})`;rCtx.lineWidth=1;rCtx.stroke();}
+    waterRAF=requestAnimationFrame(loop);
+  }
+  stopWater();loop();
+}
+function stopWater(){if(waterRAF){cancelAnimationFrame(waterRAF);waterRAF=null;}}
+
+// Falling petals
+(function(){
+  const count=60;
+  for(let i=0;i<count;i++){
+    const p=document.createElement('div');
+    p.className='petal';
+    const size=Math.random()*5+2;
+    const hue=Math.random()*20+340;
+    const sat=Math.random()*20+70;
+    p.style.cssText=`
+      width:${size}px; height:${size*0.7}px;
+      left:${Math.random()*100}vw;
+      top:${Math.random()*-30}vh;
+      background:hsla(${hue},${sat}%,75%,${Math.random()*0.3+0.15});
+      animation-duration:${Math.random()*8+6}s;
+      animation-delay:${Math.random()*12}s;
+      filter:blur(${Math.random()*0.8}px);
+    `;
+    document.body.appendChild(p);
+  }
+})();
+</script>
+</body>
+</html>
